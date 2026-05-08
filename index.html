@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>360° Облёт объекта</title>
+    <title>360° Облёт объекта с инерцией</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
             user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         body {
@@ -18,7 +19,6 @@
             font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
         }
 
-        /* Полноэкранный контейнер */
         #spin-viewer {
             width: 100vw;
             height: 100vh;
@@ -32,7 +32,6 @@
             cursor: grabbing;
         }
 
-        /* Основное изображение (чёткое, по центру) */
         #spin-image {
             width: 100%;
             height: 100%;
@@ -43,7 +42,6 @@
             z-index: 2;
         }
 
-        /* Размытый фон (сильный blur) */
         .blur-bg {
             position: absolute;
             top: 0;
@@ -55,10 +53,9 @@
             filter: blur(30px);
             transform: scale(1.1);
             z-index: 1;
-            transition: background-image 0.1s ease;
+            transition: background-image 0.05s ease;
         }
 
-        /* Подсказка для пользователя */
         .controls-hint {
             position: fixed;
             bottom: 20px;
@@ -90,7 +87,7 @@
     <img id="spin-image" src="" alt="360° облёт объекта">
 </div>
 <div class="controls-hint">
-    🖱️ Перетащи мышкой влево-вправо | 👆 Или пальцем
+    🖱️ Перетащи мышкой | 👆 Или свайпни с инерцией
 </div>
 
 <script>
@@ -100,6 +97,10 @@
     const FILE_PREFIX = "out";            // Префикс: "out"
     const FILE_SUFFIX = ".jpeg";          // Расширение: .jpeg
     const ZERO_PADDING = 0;               // 0 = out1, out2 (без нулей)
+    
+    // Настройки инерции
+    const INERTIA_DECAY = 0.92;           // Скорость затухания (0.92 = плавно, 0.98 = дольше)
+    const INERTIA_STOP_SPEED = 0.01;      // Минимальная скорость для остановки
     // ===================================================
 
     function getImageUrl(frameNumber) {
@@ -113,58 +114,134 @@
 
     let currentFrame = 1;
     let isDragging = false;
+    let lastX = 0;
+    let lastTimestamp = 0;
+    let velocity = 0;                      // Скорость в кадрах/мс
+    let inertiaAnimationId = null;
     
     const viewer = document.getElementById('spin-viewer');
     const imgElement = document.getElementById('spin-image');
     const blurBg = document.getElementById('blur-bg');
 
-    function updateImage(frame) {
+    function updateImage(frame, skipBlurUpdate = false) {
         // Циклическая коррекция
         while (frame > TOTAL_FRAMES) frame -= TOTAL_FRAMES;
         while (frame < 1) frame += TOTAL_FRAMES;
         
-        if (currentFrame !== frame) {
+        if (Math.abs(currentFrame - frame) > 0.1) {
             currentFrame = frame;
-            const imageUrl = getImageUrl(currentFrame);
+            const imageUrl = getImageUrl(Math.round(currentFrame));
             imgElement.src = imageUrl;
-            // Обновляем размытый фон той же картинкой
-            blurBg.style.backgroundImage = `url('${imageUrl}')`;
+            if (!skipBlurUpdate) {
+                blurBg.style.backgroundImage = `url('${imageUrl}')`;
+            }
         }
     }
 
-    // Функция для получения номера кадра по позиции мыши
+    // Получить номер кадра из позиции (от 0 до width)
     function getFrameFromPosition(clientX) {
         const width = window.innerWidth;
         let t = clientX / width;
         t = Math.max(0, Math.min(1, t));
-        let frame = Math.floor(t * TOTAL_FRAMES) + 1;
-        return Math.min(TOTAL_FRAMES, Math.max(1, frame));
+        return 1 + t * (TOTAL_FRAMES - 1);
     }
 
-    // === ОБРАБОТЧИК ПЕРЕТАСКИВАНИЯ ===
+    // Анимация инерции
+    function startInertia() {
+        if (inertiaAnimationId) cancelAnimationFrame(inertiaAnimationId);
+        
+        let lastFrameTime = performance.now();
+        let currentVelocity = velocity;
+        let currentFrameValue = currentFrame;
+        
+        function animateInertia(now) {
+            const dt = Math.min(32, now - lastFrameTime);
+            lastFrameTime = now;
+            
+            // Обновляем позицию по скорости
+            currentFrameValue += currentVelocity * dt;
+            
+            // Применяем затухание
+            currentVelocity *= INERTIA_DECAY;
+            
+            // Обновляем изображение
+            updateImage(currentFrameValue);
+            
+            // Продолжаем анимацию, если скорость достаточна
+            if (Math.abs(currentVelocity) > INERTIA_STOP_SPEED) {
+                inertiaAnimationId = requestAnimationFrame(animateInertia);
+            } else {
+                // Финализируем до целого кадра
+                updateImage(Math.round(currentFrameValue));
+                inertiaAnimationId = null;
+                velocity = 0;
+            }
+        }
+        
+        inertiaAnimationId = requestAnimationFrame(animateInertia);
+    }
+
+    // === ОБРАБОТЧИК ПЕРЕТАСКИВАНИЯ С ИЗМЕРЕНИЕМ СКОРОСТИ ===
     function onDragStart(e) {
         e.preventDefault();
-        isDragging = true;
-        viewer.style.cursor = 'grabbing';
         
-        // Сразу обновляем кадр по текущей позиции
-        const startX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
-        const newFrame = getFrameFromPosition(startX);
+        // Останавливаем текущую инерцию
+        if (inertiaAnimationId) {
+            cancelAnimationFrame(inertiaAnimationId);
+            inertiaAnimationId = null;
+        }
+        
+        isDragging = true;
+        velocity = 0;
+        
+        const clientX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
+        lastX = clientX;
+        lastTimestamp = performance.now();
+        
+        // Устанавливаем кадр по текущей позиции
+        const newFrame = getFrameFromPosition(clientX);
         updateImage(newFrame);
+        
+        viewer.style.cursor = 'grabbing';
     }
 
     function onDragMove(e) {
         if (!isDragging) return;
         e.preventDefault();
         
-        let currentX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
+        const currentX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
+        const now = performance.now();
+        const dt = Math.max(1, now - lastTimestamp);
+        
+        // Вычисляем мгновенную скорость (пиксели/мс)
+        const deltaPx = currentX - lastX;
+        const pixelVelocity = deltaPx / dt;
+        
+        // Конвертируем скорость пикселей в скорость кадров
+        // от левого края до правого = TOTAL_FRAMES кадров
+        const frameVelocity = pixelVelocity / window.innerWidth * TOTAL_FRAMES;
+        velocity = frameVelocity * 0.7; // небольшое сглаживание
+        
+        // Обновляем позицию
         const newFrame = getFrameFromPosition(currentX);
         updateImage(newFrame);
+        
+        lastX = currentX;
+        lastTimestamp = now;
     }
 
     function onDragEnd(e) {
         isDragging = false;
         viewer.style.cursor = 'grab';
+        
+        // Запускаем инерцию, если скорость достаточна
+        if (Math.abs(velocity) > 0.02) {
+            startInertia();
+        } else {
+            velocity = 0;
+            // Доводим до целого кадра
+            updateImage(Math.round(currentFrame));
+        }
     }
 
     // Мышь
@@ -182,9 +259,9 @@
     // Загружаем первый кадр
     updateImage(1);
     
-    console.log(`✅ 360° плеер готов! Кадров: ${TOTAL_FRAMES}`);
+    console.log(`✅ 360° плеер с инерцией готов! Кадров: ${TOTAL_FRAMES}`);
     console.log(`📁 Первый файл: ${getImageUrl(1)}`);
-    console.log(`🎨 Сильный blur (30px) добавлен вместо чёрных полей`);
+    console.log(`⚡ Инерция включена: быстрый свайп → плавное затухание`);
 </script>
 </body>
 </html>
