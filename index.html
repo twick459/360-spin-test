@@ -35,9 +35,10 @@
         #spin-image {
             width: 100%;
             height: 100%;
-            object-fit: cover;  /* заполнение по вертикали */
+            object-fit: contain;  /* ← было cover, стало contain - изображение вписывается целиком */
             pointer-events: none;
             display: block;
+            background: #000;     /* чёрные поля по бокам, если нужно */
         }
 
         /* Подсказка для пользователя */
