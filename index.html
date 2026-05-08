@@ -13,31 +13,15 @@
         }
 
         body {
-            background: #1a1a1a;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            background: #000;
+            overflow: hidden;
             font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
         }
 
-        .container {
-            max-width: 1200px;
-            width: 100%;
-            padding: 20px;
-        }
-
-        .viewer-wrapper {
-            background: #000;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-            position: relative;
-        }
-
+        /* Полноэкранный контейнер */
         #spin-viewer {
-            width: 100%;
-            aspect-ratio: 16 / 9;
+            width: 100vw;
+            height: 100vh;
             cursor: grab;
             overflow: hidden;
             position: relative;
@@ -51,93 +35,59 @@
         #spin-image {
             width: 100%;
             height: 100%;
-            object-fit: contain;
+            object-fit: cover;  /* заполнение по вертикали */
             pointer-events: none;
             display: block;
         }
 
-        .controls-info {
-            display: flex;
-            justify-content: center;
-            gap: 32px;
-            margin-top: 20px;
-            color: #ccc;
-            font-size: 14px;
-            background: rgba(0,0,0,0.7);
-            padding: 12px 20px;
-            border-radius: 40px;
-            backdrop-filter: blur(8px);
-            width: fit-content;
-            margin-left: auto;
-            margin-right: auto;
-        }
-
-        .controls-info span {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .controls-info span:before {
-            content: "🖱️";
-            font-size: 18px;
-        }
-
-        .controls-info span:last-child:before {
-            content: "📜";
-        }
-
-        @media (max-width: 600px) {
-            .controls-info {
-                font-size: 12px;
-                gap: 20px;
-            }
-        }
-
-        .loading {
-            position: absolute;
+        /* Подсказка для пользователя */
+        .controls-hint {
+            position: fixed;
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0,0,0,0.7);
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(8px);
             color: white;
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 12px;
+            padding: 8px 16px;
+            border-radius: 40px;
+            font-size: 14px;
             pointer-events: none;
             z-index: 10;
+            white-space: nowrap;
+        }
+
+        @media (max-width: 600px) {
+            .controls-hint {
+                font-size: 12px;
+                bottom: 15px;
+                padding: 6px 12px;
+            }
         }
     </style>
 </head>
 <body>
-<div class="container">
-    <div class="viewer-wrapper">
-        <div id="spin-viewer">
-            <img id="spin-image" src="" alt="360° облёт объекта">
-        </div>
-    </div>
-    <div class="controls-info">
-        <span>Перетащи мышкой</span>
-        <span>или крути колёсико</span>
-    </div>
+<div id="spin-viewer">
+    <img id="spin-image" src="" alt="360° облёт объекта">
+</div>
+<div class="controls-hint">
+    🖱️ Перетащи мышкой влево-вправо | 👆 Или пальцем
 </div>
 
 <script>
-    // ==================== НАСТРОЙКИ (под out1.jpeg, out2.jpeg ...) ====================
-    const TOTAL_FRAMES = 15;              // ⚠️ ИЗМЕНИТЕ: сколько у вас файлов? (out1.jpeg, out2.jpeg ... out36.jpeg)
+    // ==================== НАСТРОЙКИ ====================
+    const TOTAL_FRAMES = 15;              // ⚠️ СКОЛЬКО У ВАС ФАЙЛОВ? (out1.jpeg, out2.jpeg ...)
     const IMAGE_PATH = "images/";         // Папка с картинками
-    const FILE_PREFIX = "out";            // Префикс перед номером (для ваших файлов "out")
-    const FILE_SUFFIX = ".jpeg";          // Расширение (у вас .jpeg)
-    const ZERO_PADDING = 0;               // 0 = без ведущих нулей (out1, out2, а не out01)
-    // ==============================================================================
+    const FILE_PREFIX = "out";            // Префикс: "out"
+    const FILE_SUFFIX = ".jpeg";          // Расширение: .jpeg (или .jpg)
+    const ZERO_PADDING = 0;               // 0 = out1, out2 (без нулей)
+    // ===================================================
 
-    // Автоматическое создание имени файла
     function getImageUrl(frameNumber) {
         if (ZERO_PADDING > 0) {
             const paddedNum = frameNumber.toString().padStart(ZERO_PADDING, '0');
             return `${IMAGE_PATH}${FILE_PREFIX}${paddedNum}${FILE_SUFFIX}`;
         } else {
-            // Без ведущих нулей: out1.jpeg, out2.jpeg и т.д.
             return `${IMAGE_PATH}${FILE_PREFIX}${frameNumber}${FILE_SUFFIX}`;
         }
     }
@@ -146,56 +96,45 @@
     let isDragging = false;
     let startX = 0;
     let startFrame = 1;
-    let dragSensitivity = 2.5;
-    let wheelSensitivity = 0.8;
+    
+    // Чувствительность: 1 полный оборот = ширина экрана
+    // Чем больше число, тем медленнее вращение. 1 = ровно от левого до правого края = полный 360°
+    const SENSITIVITY = 1.0;   // Не меняйте, если не понимаете эффект
 
     const viewer = document.getElementById('spin-viewer');
     const imgElement = document.getElementById('spin-image');
 
-    function preloadAdjacentFrames(frame) {
-        const prev = frame === 1 ? TOTAL_FRAMES : frame - 1;
-        const next = frame === TOTAL_FRAMES ? 1 : frame + 1;
-        const imgPrev = new Image();
-        const imgNext = new Image();
-        imgPrev.src = getImageUrl(prev);
-        imgNext.src = getImageUrl(next);
-    }
-
-    function updateImage(frame, skipPreload = false) {
-        if (frame < 1) frame = TOTAL_FRAMES;
-        if (frame > TOTAL_FRAMES) frame = 1;
-        currentFrame = frame;
-        const newSrc = getImageUrl(currentFrame);
-        if (imgElement.src !== newSrc) {
-            imgElement.src = newSrc;
+    function updateImage(frame) {
+        // Циклическая коррекция
+        while (frame > TOTAL_FRAMES) frame -= TOTAL_FRAMES;
+        while (frame < 1) frame += TOTAL_FRAMES;
+        
+        if (currentFrame !== frame) {
+            currentFrame = frame;
+            imgElement.src = getImageUrl(currentFrame);
         }
-        if (!skipPreload) preloadAdjacentFrames(currentFrame);
     }
 
-    // Проверка в консоли
-    const testPath = getImageUrl(1);
-    console.log(`📸 Плеер настроен. Ищет файлы: ${testPath}`);
-    console.log(`📸 Всего кадров: ${TOTAL_FRAMES}`);
-    console.log(`📸 Расширение: .jpeg`);
-    
-    // Загружаем первый кадр
-    updateImage(1, false);
+    // Функция привязки кадра к позиции мыши (от 0 до ширины экрана)
+    function updateFrameFromPosition(clientX) {
+        // Получаем ширину видимой области
+        const width = window.innerWidth;
+        // Нормализуем позицию от 0 до 1 (0 = левый край, 1 = правый край)
+        let t = clientX / width;
+        // Ограничиваем от 0 до 1
+        t = Math.max(0, Math.min(1, t));
+        // Переводим в номер кадра (1..TOTAL_FRAMES)
+        let frame = Math.floor(t * TOTAL_FRAMES) + 1;
+        // Корректируем границы
+        frame = Math.min(TOTAL_FRAMES, Math.max(1, frame));
+        updateImage(frame);
+    }
 
-    // Обработчик колёсика
-    viewer.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        let delta = e.deltaY > 0 ? 1 : -1;
-        let newFrame = currentFrame + (delta * wheelSensitivity);
-        newFrame = Math.round(newFrame);
-        if (newFrame > TOTAL_FRAMES) newFrame = 1;
-        if (newFrame < 1) newFrame = TOTAL_FRAMES;
-        updateImage(newFrame);
-    }, { passive: false });
-
-    // Обработчик перетаскивания
+    // === ОБРАБОТЧИК ПЕРЕТАСКИВАНИЯ (как в примере) ===
     function onDragStart(e) {
         e.preventDefault();
         isDragging = true;
+        // Запоминаем начальную позицию и текущий кадр
         startX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
         startFrame = currentFrame;
         viewer.style.cursor = 'grabbing';
@@ -204,19 +143,25 @@
     function onDragMove(e) {
         if (!isDragging) return;
         e.preventDefault();
+        
         let currentX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
         let deltaX = currentX - startX;
-        let frameShift = Math.round(deltaX / dragSensitivity);
-        let newFrame = startFrame + frameShift;
-        while (newFrame > TOTAL_FRAMES) newFrame -= TOTAL_FRAMES;
-        while (newFrame < 1) newFrame += TOTAL_FRAMES;
-        updateImage(newFrame, true);
+        
+        if (deltaX === 0) return;
+        
+        // Нормализуем смещение относительно ширины экрана
+        const width = window.innerWidth;
+        let deltaNormalized = deltaX / width;
+        
+        // Вычисляем новый кадр: начальный кадр + смещение в кадрах
+        let newFrame = startFrame + (deltaNormalized * TOTAL_FRAMES);
+        
+        updateImage(Math.round(newFrame));
     }
 
     function onDragEnd(e) {
         isDragging = false;
         viewer.style.cursor = 'grab';
-        preloadAdjacentFrames(currentFrame);
     }
 
     // Мышь
@@ -229,7 +174,15 @@
     viewer.addEventListener('touchmove', onDragMove, { passive: false });
     viewer.addEventListener('touchend', onDragEnd);
 
+    // Запрещаем перетаскивание самого изображения
     viewer.addEventListener('dragstart', (e) => e.preventDefault());
+    
+    // Загружаем первый кадр и центрируем позицию (левый край = кадр 1)
+    updateImage(1);
+    
+    // Небольшой лог в консоль
+    console.log(`✅ 360° плеер готов! Кадров: ${TOTAL_FRAMES}`);
+    console.log(`📁 Первый файл: ${getImageUrl(1)}`);
 </script>
 </body>
 </html>
