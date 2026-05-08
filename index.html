@@ -32,13 +32,30 @@
             cursor: grabbing;
         }
 
+        /* Основное изображение (чёткое, по центру) */
         #spin-image {
             width: 100%;
             height: 100%;
-            object-fit: contain;  /* ← было cover, стало contain - изображение вписывается целиком */
+            object-fit: contain;
             pointer-events: none;
             display: block;
-            background: #000;     /* чёрные поля по бокам, если нужно */
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Размытый фон (сильный blur) */
+        .blur-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
+            filter: blur(30px);
+            transform: scale(1.1);
+            z-index: 1;
+            transition: background-image 0.1s ease;
         }
 
         /* Подсказка для пользователя */
@@ -69,6 +86,7 @@
 </head>
 <body>
 <div id="spin-viewer">
+    <div class="blur-bg" id="blur-bg"></div>
     <img id="spin-image" src="" alt="360° облёт объекта">
 </div>
 <div class="controls-hint">
@@ -77,10 +95,10 @@
 
 <script>
     // ==================== НАСТРОЙКИ ====================
-    const TOTAL_FRAMES = 15;              // ⚠️ СКОЛЬКО У ВАС ФАЙЛОВ? (out1.jpeg, out2.jpeg ...)
+    const TOTAL_FRAMES = 15;              // 15 картинок
     const IMAGE_PATH = "images/";         // Папка с картинками
     const FILE_PREFIX = "out";            // Префикс: "out"
-    const FILE_SUFFIX = ".jpeg";          // Расширение: .jpeg (или .jpg)
+    const FILE_SUFFIX = ".jpeg";          // Расширение: .jpeg
     const ZERO_PADDING = 0;               // 0 = out1, out2 (без нулей)
     // ===================================================
 
@@ -95,15 +113,10 @@
 
     let currentFrame = 1;
     let isDragging = false;
-    let startX = 0;
-    let startFrame = 1;
     
-    // Чувствительность: 1 полный оборот = ширина экрана
-    // Чем больше число, тем медленнее вращение. 1 = ровно от левого до правого края = полный 360°
-    const SENSITIVITY = 1.0;   // Не меняйте, если не понимаете эффект
-
     const viewer = document.getElementById('spin-viewer');
     const imgElement = document.getElementById('spin-image');
+    const blurBg = document.getElementById('blur-bg');
 
     function updateImage(frame) {
         // Циклическая коррекция
@@ -112,33 +125,32 @@
         
         if (currentFrame !== frame) {
             currentFrame = frame;
-            imgElement.src = getImageUrl(currentFrame);
+            const imageUrl = getImageUrl(currentFrame);
+            imgElement.src = imageUrl;
+            // Обновляем размытый фон той же картинкой
+            blurBg.style.backgroundImage = `url('${imageUrl}')`;
         }
     }
 
-    // Функция привязки кадра к позиции мыши (от 0 до ширины экрана)
-    function updateFrameFromPosition(clientX) {
-        // Получаем ширину видимой области
+    // Функция для получения номера кадра по позиции мыши
+    function getFrameFromPosition(clientX) {
         const width = window.innerWidth;
-        // Нормализуем позицию от 0 до 1 (0 = левый край, 1 = правый край)
         let t = clientX / width;
-        // Ограничиваем от 0 до 1
         t = Math.max(0, Math.min(1, t));
-        // Переводим в номер кадра (1..TOTAL_FRAMES)
         let frame = Math.floor(t * TOTAL_FRAMES) + 1;
-        // Корректируем границы
-        frame = Math.min(TOTAL_FRAMES, Math.max(1, frame));
-        updateImage(frame);
+        return Math.min(TOTAL_FRAMES, Math.max(1, frame));
     }
 
-    // === ОБРАБОТЧИК ПЕРЕТАСКИВАНИЯ (как в примере) ===
+    // === ОБРАБОТЧИК ПЕРЕТАСКИВАНИЯ ===
     function onDragStart(e) {
         e.preventDefault();
         isDragging = true;
-        // Запоминаем начальную позицию и текущий кадр
-        startX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
-        startFrame = currentFrame;
         viewer.style.cursor = 'grabbing';
+        
+        // Сразу обновляем кадр по текущей позиции
+        const startX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
+        const newFrame = getFrameFromPosition(startX);
+        updateImage(newFrame);
     }
 
     function onDragMove(e) {
@@ -146,18 +158,8 @@
         e.preventDefault();
         
         let currentX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
-        let deltaX = currentX - startX;
-        
-        if (deltaX === 0) return;
-        
-        // Нормализуем смещение относительно ширины экрана
-        const width = window.innerWidth;
-        let deltaNormalized = deltaX / width;
-        
-        // Вычисляем новый кадр: начальный кадр + смещение в кадрах
-        let newFrame = startFrame + (deltaNormalized * TOTAL_FRAMES);
-        
-        updateImage(Math.round(newFrame));
+        const newFrame = getFrameFromPosition(currentX);
+        updateImage(newFrame);
     }
 
     function onDragEnd(e) {
@@ -175,15 +177,14 @@
     viewer.addEventListener('touchmove', onDragMove, { passive: false });
     viewer.addEventListener('touchend', onDragEnd);
 
-    // Запрещаем перетаскивание самого изображения
     viewer.addEventListener('dragstart', (e) => e.preventDefault());
     
-    // Загружаем первый кадр и центрируем позицию (левый край = кадр 1)
+    // Загружаем первый кадр
     updateImage(1);
     
-    // Небольшой лог в консоль
     console.log(`✅ 360° плеер готов! Кадров: ${TOTAL_FRAMES}`);
     console.log(`📁 Первый файл: ${getImageUrl(1)}`);
+    console.log(`🎨 Сильный blur (30px) добавлен вместо чёрных полей`);
 </script>
 </body>
 </html>
