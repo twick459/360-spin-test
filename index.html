@@ -40,12 +40,12 @@
             display: block;
             position: relative;
             z-index: 2;
-            opacity: 0;  /* Скрыто до загрузки */
+            opacity: 0;
             transition: opacity 0.2s ease;
         }
 
         #spin-image.loaded {
-            opacity: 1;  /* Показываем после загрузки */
+            opacity: 1;
         }
 
         .blur-bg {
@@ -60,15 +60,9 @@
             transform: scale(1.1);
             z-index: 1;
             transition: background-image 0.05s ease;
-            opacity: 0;
-            transition: opacity 0.2s ease;
+            opacity: 1;  /* Всегда видим */
         }
 
-        .blur-bg.loaded {
-            opacity: 1;
-        }
-
-        /* Скелетон/лоадер на время загрузки */
         .loader {
             position: absolute;
             top: 50%;
@@ -157,7 +151,6 @@
     let lastTimestamp = 0;
     let velocity = 0;
     let inertiaAnimationId = null;
-    let firstImagePreloaded = false;
     
     const viewer = document.getElementById('spin-viewer');
     const imgElement = document.getElementById('spin-image');
@@ -179,14 +172,13 @@
         
         if (Math.abs(currentFrame - frame) > 0.1) {
             currentFrame = frame;
-            const imageUrl = getImageUrl(Math.round(currentFrame));
+            const roundedFrame = Math.round(currentFrame);
+            const imageUrl = getImageUrl(roundedFrame);
             
-            // Для фона обновляем без проверки на загрузку
-            if (!skipBlurUpdate) {
-                blurBg.style.backgroundImage = `url('${imageUrl}')`;
-            }
+            // Обновляем размытый фон (всегда)
+            blurBg.style.backgroundImage = `url('${imageUrl}')`;
             
-            // Для основного изображения
+            // Обновляем основное изображение
             if (imgElement.src !== imageUrl) {
                 imgElement.src = imageUrl;
             }
@@ -281,44 +273,44 @@
         }
     }
 
-    // ПРЕДЗАГРУЗКА ПЕРВОГО ИЗОБРАЖЕНИЯ
-    function preloadFirstImage() {
+    // ПРЕДЗАГРУЗКА ПЕРВОГО ИЗОБРАЖЕНИЯ (ФОН ВИДЕН СРАЗУ)
+    function initFirstFrame() {
         const firstImageUrl = getImageUrl(1);
+        
+        // Сразу устанавливаем фон (размытие) - будет видно даже до загрузки основного
+        blurBg.style.backgroundImage = `url('${firstImageUrl}')`;
+        
+        // Загружаем основное изображение
         const img = new Image();
         
         img.onload = function() {
             console.log('✅ Первое изображение загружено:', firstImageUrl);
             
-            // Устанавливаем изображения
+            // Устанавливаем основное изображение
             imgElement.src = firstImageUrl;
-            blurBg.style.backgroundImage = `url('${firstImageUrl})`;
             
             // Показываем с плавным появлением
             imgElement.classList.add('loaded');
-            blurBg.classList.add('loaded');
             
             // Скрываем лоадер и показываем подсказку
             hideLoader();
             setTimeout(() => showControlsHint(), 100);
             
-            firstImagePreloaded = true;
-            
-            // Предзагружаем остальные кадры для плавности
+            // Предзагружаем остальные кадры в фоне
             preloadRemainingFrames();
         };
         
         img.onerror = function() {
             console.error('❌ Ошибка загрузки первого изображения:', firstImageUrl);
-            console.error('Проверьте путь к папке images и названия файлов out1.jpeg, out2.jpeg...');
+            console.error('Проверьте: папка images/ и файлы out1.jpeg, out2.jpeg...');
             hideLoader();
-            // Показываем сообщение об ошибке
             imgElement.alt = 'Ошибка: файлы не найдены. Проверьте папку images/out1.jpeg';
+            // Фон уже установлен, хоть что-то видно
         };
         
         img.src = firstImageUrl;
     }
     
-    // Предзагрузка остальных кадров в фоне
     function preloadRemainingFrames() {
         for (let i = 2; i <= TOTAL_FRAMES; i++) {
             const img = new Image();
@@ -339,12 +331,13 @@
 
     viewer.addEventListener('dragstart', (e) => e.preventDefault());
     
-    // ЗАПУСК: предзагружаем первое изображение
-    preloadFirstImage();
+    // ЗАПУСК: сразу показываем фон с первым кадром
+    initFirstFrame();
     
     console.log(`🚀 360° плеер запущен. Всего кадров: ${TOTAL_FRAMES}`);
     console.log(`📁 Ожидается папка: ${IMAGE_PATH}`);
     console.log(`📸 Первый файл: ${getImageUrl(1)}`);
+    console.log(`🎨 Размытый фон установлен СРАЗУ (даже до загрузки основного изображения)`);
 </script>
 </body>
 </html>
