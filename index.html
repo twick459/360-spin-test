@@ -48,19 +48,33 @@
             opacity: 1;
         }
 
+        /* Контейнер для blur фона с отдельным transition */
         .blur-bg {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
+            z-index: 1;
+            overflow: hidden;
+        }
+
+        /* Само изображение фона с blur и кроссфейдом */
+        .blur-layer {
+            position: absolute;
+            top: -10%;
+            left: -10%;
+            width: 120%;
+            height: 120%;
             background-size: cover;
             background-position: center;
             filter: blur(30px);
-            transform: scale(1.1);
-            z-index: 1;
-            transition: background-image 0.05s ease;
-            opacity: 1;  /* Всегда видим */
+            transition: opacity 0.15s ease-in-out;
+            opacity: 0;
+        }
+
+        .blur-layer.active {
+            opacity: 1;
         }
 
         .loader {
@@ -116,7 +130,10 @@
 <body>
 <div id="spin-viewer">
     <div class="loader" id="loader"></div>
-    <div class="blur-bg" id="blur-bg"></div>
+    <div class="blur-bg" id="blurBg">
+        <div class="blur-layer" id="blurLayer1"></div>
+        <div class="blur-layer" id="blurLayer2"></div>
+    </div>
     <img id="spin-image" src="" alt="360° облёт объекта">
 </div>
 <div class="controls-hint" id="controlsHint">
@@ -151,10 +168,12 @@
     let lastTimestamp = 0;
     let velocity = 0;
     let inertiaAnimationId = null;
+    let currentBlurLayer = 1;  // 1 или 2 для переключения слоёв
     
     const viewer = document.getElementById('spin-viewer');
     const imgElement = document.getElementById('spin-image');
-    const blurBg = document.getElementById('blur-bg');
+    const blurLayer1 = document.getElementById('blurLayer1');
+    const blurLayer2 = document.getElementById('blurLayer2');
     const loader = document.getElementById('loader');
     const controlsHint = document.getElementById('controlsHint');
 
@@ -166,6 +185,32 @@
         controlsHint.classList.add('visible');
     }
 
+    // Обновление фона с кроссфейдом (без моргания)
+    let pendingBlurUpdate = null;
+    
+    function updateBlurBackground(imageUrl) {
+        // Если уже есть запланированное обновление, отменяем его
+        if (pendingBlurUpdate) {
+            clearTimeout(pendingBlurUpdate);
+        }
+        
+        // Определяем активный и неактивный слой
+        const activeLayer = currentBlurLayer === 1 ? blurLayer1 : blurLayer2;
+        const inactiveLayer = currentBlurLayer === 1 ? blurLayer2 : blurLayer1;
+        
+        // Устанавливаем новый фон на неактивный слой
+        inactiveLayer.style.backgroundImage = `url('${imageUrl}')`;
+        
+        // Небольшая задержка для предотвращения частых обновлений при быстром перетаскивании
+        pendingBlurUpdate = setTimeout(() => {
+            // Переключаем слои
+            activeLayer.classList.remove('active');
+            inactiveLayer.classList.add('active');
+            currentBlurLayer = currentBlurLayer === 1 ? 2 : 1;
+            pendingBlurUpdate = null;
+        }, 50);
+    }
+
     function updateImage(frame, skipBlurUpdate = false) {
         while (frame > TOTAL_FRAMES) frame -= TOTAL_FRAMES;
         while (frame < 1) frame += TOTAL_FRAMES;
@@ -175,12 +220,14 @@
             const roundedFrame = Math.round(currentFrame);
             const imageUrl = getImageUrl(roundedFrame);
             
-            // Обновляем размытый фон (всегда)
-            blurBg.style.backgroundImage = `url('${imageUrl}')`;
-            
             // Обновляем основное изображение
             if (imgElement.src !== imageUrl) {
                 imgElement.src = imageUrl;
+            }
+            
+            // Обновляем фон с умной задержкой
+            if (!skipBlurUpdate) {
+                updateBlurBackground(imageUrl);
             }
         }
     }
@@ -273,30 +320,24 @@
         }
     }
 
-    // ПРЕДЗАГРУЗКА ПЕРВОГО ИЗОБРАЖЕНИЯ (ФОН ВИДЕН СРАЗУ)
-    function initFirstFrame() {
+    // ИНИЦИАЛИЗАЦИЯ
+    function init() {
         const firstImageUrl = getImageUrl(1);
         
-        // Сразу устанавливаем фон (размытие) - будет видно даже до загрузки основного
-        blurBg.style.backgroundImage = `url('${firstImageUrl}')`;
+        // Устанавливаем начальный фон на оба слоя
+        blurLayer1.style.backgroundImage = `url('${firstImageUrl}')`;
+        blurLayer2.style.backgroundImage = `url('${firstImageUrl}')`;
+        blurLayer1.classList.add('active');
         
         // Загружаем основное изображение
         const img = new Image();
         
         img.onload = function() {
             console.log('✅ Первое изображение загружено:', firstImageUrl);
-            
-            // Устанавливаем основное изображение
             imgElement.src = firstImageUrl;
-            
-            // Показываем с плавным появлением
             imgElement.classList.add('loaded');
-            
-            // Скрываем лоадер и показываем подсказку
             hideLoader();
             setTimeout(() => showControlsHint(), 100);
-            
-            // Предзагружаем остальные кадры в фоне
             preloadRemainingFrames();
         };
         
@@ -305,7 +346,6 @@
             console.error('Проверьте: папка images/ и файлы out1.jpeg, out2.jpeg...');
             hideLoader();
             imgElement.alt = 'Ошибка: файлы не найдены. Проверьте папку images/out1.jpeg';
-            // Фон уже установлен, хоть что-то видно
         };
         
         img.src = firstImageUrl;
@@ -331,13 +371,11 @@
 
     viewer.addEventListener('dragstart', (e) => e.preventDefault());
     
-    // ЗАПУСК: сразу показываем фон с первым кадром
-    initFirstFrame();
+    // Запуск
+    init();
     
     console.log(`🚀 360° плеер запущен. Всего кадров: ${TOTAL_FRAMES}`);
-    console.log(`📁 Ожидается папка: ${IMAGE_PATH}`);
-    console.log(`📸 Первый файл: ${getImageUrl(1)}`);
-    console.log(`🎨 Размытый фон установлен СРАЗУ (даже до загрузки основного изображения)`);
+    console.log(`🎨 Blur фон теперь плавно переключается без моргания`);
 </script>
 </body>
 </html>
