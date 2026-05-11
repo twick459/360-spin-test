@@ -82,8 +82,9 @@
             to { transform: translate(-50%, -50%) rotate(360deg); }
         }
 
+        /* Подсказка теперь внутри #spin-viewer, а не fixed */
         .controls-hint {
-            position: fixed;
+            position: absolute;
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
@@ -104,12 +105,68 @@
             opacity: 1;
         }
 
+        /* Кнопка полноэкранного режима */
+        .fullscreen-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(8px);
+            border: none;
+            cursor: pointer;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .fullscreen-btn:hover {
+            background: rgba(0,0,0,0.8);
+            transform: scale(1.05);
+        }
+
+        .fullscreen-btn:active {
+            transform: scale(0.95);
+        }
+
+        .fullscreen-icon {
+            width: 20px;
+            height: 20px;
+            fill: white;
+            display: block;
+        }
+
         @media (max-width: 600px) {
+            .fullscreen-btn {
+                width: 40px;
+                height: 40px;
+                bottom: 15px;
+                right: 15px;
+            }
+            .fullscreen-icon {
+                width: 18px;
+                height: 18px;
+            }
             .controls-hint {
                 font-size: 12px;
                 bottom: 15px;
                 padding: 6px 12px;
             }
+        }
+
+        /* Стили для полноэкранного режима */
+        #spin-viewer:-webkit-full-screen {
+            width: 100%;
+            height: 100%;
+        }
+        #spin-viewer:fullscreen {
+            width: 100%;
+            height: 100%;
         }
     </style>
 </head>
@@ -118,9 +175,18 @@
     <div class="loader" id="loader"></div>
     <div class="blur-bg" id="blurBg"></div>
     <img id="spin-image" src="" alt="360° облёт объекта">
-</div>
-<div class="controls-hint" id="controlsHint">
-    🖱️ Перетащи мышкой | 👆 Или свайпни с инерцией
+    
+    <!-- Подсказка теперь ВНУТРИ spin-viewer -->
+    <div class="controls-hint" id="controlsHint">
+        🖱️ Перетащи мышкой | 👆 Или свайпни с инерцией
+    </div>
+    
+    <!-- Кнопка полноэкранного режима -->
+    <button class="fullscreen-btn" id="fullscreenBtn" title="Полноэкранный режим">
+        <svg class="fullscreen-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+        </svg>
+    </button>
 </div>
 
 <script>
@@ -135,6 +201,62 @@
     const INERTIA_DECAY = 0.92;
     const INERTIA_STOP_SPEED = 0.01;
     // ===================================================
+
+    // Элементы
+    const viewer = document.getElementById('spin-viewer');
+    const imgElement = document.getElementById('spin-image');
+    const blurBg = document.getElementById('blurBg');
+    const loader = document.getElementById('loader');
+    const controlsHint = document.getElementById('controlsHint');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+    // ========== ПОЛНОЭКРАННЫЙ РЕЖИМ ==========
+    function toggleFullscreen() {
+        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+            // Вход в полноэкранный режим
+            const elem = viewer;
+            if (elem.requestFullscreen) {
+                elem.requestFullscreen();
+            } else if (elem.webkitRequestFullscreen) { /* Safari */
+                elem.webkitRequestFullscreen();
+            } else if (elem.msRequestFullscreen) { /* IE/Edge */
+                elem.msRequestFullscreen();
+            }
+            updateFullscreenIcon(true);
+        } else {
+            // Выход из полноэкранного режима
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            } else if (document.webkitExitFullscreen) {
+                document.webkitExitFullscreen();
+            }
+            updateFullscreenIcon(false);
+        }
+    }
+
+    function updateFullscreenIcon(isFullscreen) {
+        const svg = fullscreenBtn.querySelector('.fullscreen-icon');
+        if (isFullscreen) {
+            // Иконка "сжать" (выход)
+            svg.innerHTML = '<path d="M8 14H6v4h4v-2H8v-2zm-2-4h2V8h2V6H6v4zm10 4h-2v2h-2v2h4v-4zm-2-8v2h2v2h2V6h-4z"/>';
+        } else {
+            // Иконка "развернуть" (вход)
+            svg.innerHTML = '<path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>';
+        }
+    }
+
+    // Слушаем изменение полноэкранного режима
+    document.addEventListener('fullscreenchange', () => {
+        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        updateFullscreenIcon(isFullscreen);
+    });
+    document.addEventListener('webkitfullscreenchange', () => {
+        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+        updateFullscreenIcon(isFullscreen);
+    });
+
+    fullscreenBtn.addEventListener('click', toggleFullscreen);
+    // ==========================================
 
     function getImageUrl(frameNumber) {
         if (ZERO_PADDING > 0) {
@@ -153,12 +275,6 @@
     let lastTimestamp = 0;
     let velocity = 0;
     let inertiaAnimationId = null;
-    
-    const viewer = document.getElementById('spin-viewer');
-    const imgElement = document.getElementById('spin-image');
-    const blurBg = document.getElementById('blurBg');
-    const loader = document.getElementById('loader');
-    const controlsHint = document.getElementById('controlsHint');
 
     function hideLoader() {
         if (loader) loader.style.display = 'none';
@@ -168,9 +284,7 @@
         controlsHint.classList.add('visible');
     }
 
-    // Обновление изображения по номеру кадра
     function updateImage(frame, skipPreload = false) {
-        // Нормализуем кадр в диапазон 1..TOTAL_FRAMES
         while (frame > TOTAL_FRAMES) frame -= TOTAL_FRAMES;
         while (frame < 1) frame += TOTAL_FRAMES;
         
@@ -186,11 +300,9 @@
         }
     }
 
-    // ОТНОСИТЕЛЬНОЕ перетаскивание: смещение мыши → смещение кадров
     function onDragStart(e) {
         e.preventDefault();
         
-        // Останавливаем текущую инерцию
         if (inertiaAnimationId) {
             cancelAnimationFrame(inertiaAnimationId);
             inertiaAnimationId = null;
@@ -199,7 +311,6 @@
         isDragging = true;
         velocity = 0;
         
-        // Запоминаем начальную позицию и текущий кадр
         dragStartX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
         dragStartFrame = currentFrame;
         lastX = dragStartX;
@@ -216,27 +327,19 @@
         const now = performance.now();
         const dt = Math.max(1, now - lastTimestamp);
         
-        // Вычисляем смещение по горизонтали
         const deltaX = currentX - dragStartX;
-        
-        // Конвертируем смещение пикселей в смещение кадров
-        // Чем шире экран, тем больше пикселей нужно для полного оборота
         const deltaFrames = (deltaX / window.innerWidth) * TOTAL_FRAMES;
         
-        // Новый кадр = начальный кадр + смещение
         let newFrame = dragStartFrame + deltaFrames;
         
-        // Нормализуем кадр
         while (newFrame > TOTAL_FRAMES) newFrame -= TOTAL_FRAMES;
         while (newFrame < 1) newFrame += TOTAL_FRAMES;
         
-        // Вычисляем скорость для инерции (по текущему движению)
         const deltaX_last = currentX - lastX;
         const pixelVelocity = deltaX_last / dt;
         const frameVelocity = (pixelVelocity / window.innerWidth) * TOTAL_FRAMES;
         velocity = frameVelocity * 0.7;
         
-        // Обновляем изображение
         updateImage(newFrame);
         
         lastX = currentX;
@@ -247,17 +350,14 @@
         isDragging = false;
         viewer.style.cursor = 'grab';
         
-        // Запускаем инерцию, если скорость достаточна
         if (Math.abs(velocity) > 0.02) {
             startInertia();
         } else {
             velocity = 0;
-            // Доводим до целого кадра
             updateImage(Math.round(currentFrame));
         }
     }
 
-    // Анимация инерции
     function startInertia() {
         if (inertiaAnimationId) cancelAnimationFrame(inertiaAnimationId);
         
@@ -269,16 +369,11 @@
             const dt = Math.min(32, now - lastFrameTime);
             lastFrameTime = now;
             
-            // Обновляем позицию по скорости
             currentFrameValue += currentVelocity * dt;
-            
-            // Применяем затухание
             currentVelocity *= INERTIA_DECAY;
             
-            // Обновляем изображение
             updateImage(currentFrameValue);
             
-            // Продолжаем или останавливаемся
             if (Math.abs(currentVelocity) > INERTIA_STOP_SPEED) {
                 inertiaAnimationId = requestAnimationFrame(animateInertia);
             } else {
@@ -291,15 +386,12 @@
         inertiaAnimationId = requestAnimationFrame(animateInertia);
     }
 
-    // ИНИЦИАЛИЗАЦИЯ
     function init() {
         const firstImageUrl = getImageUrl(1);
         
-        // Устанавливаем статичный blur фон из первого кадра
         blurBg.style.backgroundImage = `url('${firstImageUrl}')`;
         console.log('🎨 Blur фон установлен из первого кадра (статичен)');
         
-        // Загружаем основное изображение
         const img = new Image();
         
         img.onload = function() {
@@ -308,8 +400,6 @@
             imgElement.classList.add('loaded');
             hideLoader();
             setTimeout(() => showControlsHint(), 100);
-            
-            // Предзагружаем остальные кадры в фоне
             preloadRemainingFrames();
         };
         
@@ -342,13 +432,13 @@
     
     viewer.addEventListener('dragstart', (e) => e.preventDefault());
     
-    // Запуск
     init();
     
     console.log(`🚀 360° плеер запущен. Всего кадров: ${TOTAL_FRAMES}`);
     console.log(`📁 Ожидается папка: ${IMAGE_PATH}`);
     console.log(`📸 Первый файл: ${getImageUrl(1)}`);
-    console.log(`🎨 Blur фон статичен, скролл ОТНОСИТЕЛЬНЫЙ (без рывков)`);
+    console.log(`🖥️ Кнопка полноэкранного режима добавлена`);
+    console.log(`💡 Подсказка теперь внутри #spin-viewer и не пропадает в fullscreen`);
 </script>
 </body>
 </html>
