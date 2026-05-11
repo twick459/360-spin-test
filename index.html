@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>360° Облёт объекта с инерцией</title>
+    <title>360° Облёт объекта</title>
     <style>
         * {
             margin: 0;
@@ -26,29 +26,23 @@
             overflow: hidden;
             position: relative;
             background: #000;
+            will-change: transform; /* оптимизация рендеринга */
         }
 
         #spin-viewer:active {
             cursor: grabbing;
         }
 
-        #spin-image {
+        /* Используем canvas вместо img для лучшей производительности */
+        #spin-canvas {
             width: 100%;
             height: 100%;
             object-fit: contain;
-            pointer-events: none;
             display: block;
             position: relative;
             z-index: 2;
-            opacity: 0;
-            transition: opacity 0.2s ease;
         }
 
-        #spin-image.loaded {
-            opacity: 1;
-        }
-
-        /* Статичный blur фон — генерируется один раз из первого кадра */
         .blur-bg {
             position: absolute;
             top: 0;
@@ -60,10 +54,9 @@
             filter: blur(30px);
             transform: scale(1.1);
             z-index: 1;
-            opacity: 1;
-            transition: none;  /* Никаких переходов, фон статичен */
         }
 
+        /* Кастомный спиннер */
         .loader {
             position: absolute;
             top: 50%;
@@ -88,7 +81,7 @@
             bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0,0,0,0.6);
+            background: rgba(0,0,0,0.5);
             backdrop-filter: blur(8px);
             color: white;
             padding: 8px 16px;
@@ -118,7 +111,7 @@
 <div id="spin-viewer">
     <div class="loader" id="loader"></div>
     <div class="blur-bg" id="blurBg"></div>
-    <img id="spin-image" src="" alt="360° облёт объекта">
+    <canvas id="spin-canvas" width="1920" height="1080"></canvas>
 </div>
 <div class="controls-hint" id="controlsHint">
     🖱️ Перетащи мышкой | 👆 Или свайпни с инерцией
@@ -126,15 +119,18 @@
 
 <script>
     // ==================== НАСТРОЙКИ ====================
-    const TOTAL_FRAMES = 70;              // 70 картинок
-    const IMAGE_PATH = "images/";         // Папка с картинками
-    const FILE_PREFIX = "out";            // Префикс: "out"
-    const FILE_SUFFIX = ".jpeg";          // Расширение: .jpeg
-    const ZERO_PADDING = 0;               // 0 = out1, out2 (без нулей)
+    const TOTAL_FRAMES = 70;
+    const IMAGE_PATH = "images/";
+    const FILE_PREFIX = "out";
+    const FILE_SUFFIX = ".jpeg";
+    const ZERO_PADDING = 0;
     
     // Настройки инерции
     const INERTIA_DECAY = 0.92;
     const INERTIA_STOP_SPEED = 0.01;
+    
+    // Оптимизация: лимит предзагрузки (не грузим все 70 сразу)
+    const PRELOAD_LIMIT = 10;  // предзагружаем только 5 соседних кадров с каждой стороны
     // ===================================================
 
     function getImageUrl(frameNumber) {
@@ -146,41 +142,108 @@
         }
     }
 
+    // Кэш изображений (чтобы не перезагружать повторно)
+    const imageCache = new Map();
+    
+    // Асинхронная загрузка изображения с кэшем
+    function loadImageAsync(frame, callback) {
+        const url = getImageUrl(frame);
+        
+        if (imageCache.has(url)) {
+            callback(imageCache.get(url));
+            return;
+        }
+        
+        const img = new Image();
+        img.onload = () => {
+            imageCache.set(url, img);
+            callback(img);
+        };
+        img.src = url;
+    }
+
     let currentFrame = 1;
     let isDragging = false;
     let lastX = 0;
     let lastTimestamp = 0;
     let velocity = 0;
     let inertiaAnimationId = null;
-    let blurInitialized = false;
+    let currentImage = null;
     
     const viewer = document.getElementById('spin-viewer');
-    const imgElement = document.getElementById('spin-image');
+    const canvas = document.getElementById('spin-canvas');
+    const ctx = canvas.getContext('2d');
     const blurBg = document.getElementById('blurBg');
     const loader = document.getElementById('loader');
     const controlsHint = document.getElementById('controlsHint');
 
-    function hideLoader() {
-        if (loader) loader.style.display = 'none';
+    // Установка размера canvas
+    function resizeCanvas() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        // Перерисовываем текущее изображение
+        if (currentImage) {
+            drawImageOnCanvas(currentImage);
+        }
     }
 
-    function showControlsHint() {
-        controlsHint.classList.add('visible');
+    // Отрисовка изображения на canvas с object-fit: contain
+    function drawImageOnCanvas(img) {
+        if (!img || !canvas || !ctx) return;
+        
+        const canvasWidth = canvas.width;
+        const canvasHeight = canvas.height;
+        const imgWidth = img.width;
+        const imgHeight = img.height;
+        
+        // Вычисляем пропорции для object-fit: contain
+        const scale = Math.min(canvasWidth / imgWidth, canvasHeight / imgHeight);
+        const drawWidth = imgWidth * scale;
+        const drawHeight = imgHeight * scale;
+        const offsetX = (canvasWidth - drawWidth) / 2;
+        const offsetY = (canvasHeight - drawHeight) / 2;
+        
+        // Очищаем и рисуем
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
     }
 
-    // Обновление только основного изображения (фон НЕ ТРОГАЕМ)
-    function updateImage(frame) {
+    function updateImage(frame, skipPreload = false) {
         while (frame > TOTAL_FRAMES) frame -= TOTAL_FRAMES;
         while (frame < 1) frame += TOTAL_FRAMES;
         
-        if (Math.abs(currentFrame - frame) > 0.1) {
-            currentFrame = frame;
-            const roundedFrame = Math.round(currentFrame);
-            const imageUrl = getImageUrl(roundedFrame);
+        const roundedFrame = Math.round(frame);
+        
+        if (currentFrame !== roundedFrame) {
+            currentFrame = roundedFrame;
             
-            // Обновляем только чёткое изображение
-            if (imgElement.src !== imageUrl) {
-                imgElement.src = imageUrl;
+            // Загружаем и отображаем изображение
+            loadImageAsync(currentFrame, (img) => {
+                currentImage = img;
+                drawImageOnCanvas(img);
+            });
+            
+            // Умная предзагрузка: только соседние кадры
+            if (!skipPreload) {
+                preloadAdjacentFrames(currentFrame);
+            }
+        }
+    }
+    
+    // Предзагрузка только ближайших кадров (не всех 70)
+    function preloadAdjacentFrames(frame) {
+        const start = Math.max(1, frame - PRELOAD_LIMIT);
+        const end = Math.min(TOTAL_FRAMES, frame + PRELOAD_LIMIT);
+        
+        for (let i = start; i <= end; i++) {
+            if (i !== frame) {
+                const url = getImageUrl(i);
+                if (!imageCache.has(url)) {
+                    const img = new Image();
+                    img.src = url;
+                    imageCache.set(url, img); // кэшируем сразу по URL
+                }
             }
         }
     }
@@ -206,7 +269,7 @@
             currentFrameValue += currentVelocity * dt;
             currentVelocity *= INERTIA_DECAY;
             
-            updateImage(currentFrameValue);
+            updateImage(currentFrameValue, true);
             
             if (Math.abs(currentVelocity) > INERTIA_STOP_SPEED) {
                 inertiaAnimationId = requestAnimationFrame(animateInertia);
@@ -255,7 +318,7 @@
         velocity = frameVelocity * 0.7;
         
         const newFrame = getFrameFromPosition(currentX);
-        updateImage(newFrame);
+        updateImage(newFrame, true);
         
         lastX = currentX;
         lastTimestamp = now;
@@ -273,65 +336,56 @@
         }
     }
 
-    // ИНИЦИАЛИЗАЦИЯ: загружаем первый кадр для blur и основного изображения
+    function hideLoader() {
+        if (loader) loader.style.display = 'none';
+    }
+
+    function showControlsHint() {
+        controlsHint.classList.add('visible');
+    }
+
+    // ИНИЦИАЛИЗАЦИЯ
     function init() {
         const firstImageUrl = getImageUrl(1);
         
-        // 1. Сразу устанавливаем blur фон из первого кадра (статично, больше не меняется)
+        // Устанавливаем статичный blur фон
         blurBg.style.backgroundImage = `url('${firstImageUrl}')`;
-        console.log('🎨 Blur фон установлен из первого кадра (статичен)');
         
-        // 2. Загружаем основное изображение
-        const img = new Image();
+        // Настраиваем canvas
+        resizeCanvas();
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            if (currentImage) drawImageOnCanvas(currentImage);
+        });
         
-        img.onload = function() {
-            console.log('✅ Первое изображение загружено:', firstImageUrl);
-            imgElement.src = firstImageUrl;
-            imgElement.classList.add('loaded');
+        // Загружаем первое изображение
+        loadImageAsync(1, (img) => {
+            currentImage = img;
+            drawImageOnCanvas(img);
             hideLoader();
             setTimeout(() => showControlsHint(), 100);
             
-            // Предзагружаем остальные 69 кадров в фоне
-            preloadRemainingFrames();
-        };
+            // Предзагружаем первые 10 кадров для плавного старта
+            for (let i = 2; i <= Math.min(10, TOTAL_FRAMES); i++) {
+                loadImageAsync(i, () => {});
+            }
+        });
         
-        img.onerror = function() {
-            console.error('❌ Ошибка загрузки первого изображения:', firstImageUrl);
-            console.error('Проверьте: папка images/ и файлы out1.jpeg, out2.jpeg... до out70.jpeg');
-            hideLoader();
-            imgElement.alt = 'Ошибка: файлы не найдены. Проверьте папку images/out1.jpeg';
-        };
-        
-        img.src = firstImageUrl;
-    }
-    
-    function preloadRemainingFrames() {
-        for (let i = 2; i <= TOTAL_FRAMES; i++) {
-            const img = new Image();
-            img.src = getImageUrl(i);
-        }
-        console.log(`📦 Предзагружено ${TOTAL_FRAMES - 1} кадров в фоне`);
+        console.log(`🚀 Оптимизированный плеер | Кадров: ${TOTAL_FRAMES}`);
+        console.log(`📁 Путь: ${IMAGE_PATH}out1.jpeg ... out${TOTAL_FRAMES}.jpeg`);
+        console.log(`⚡ Кэш включён | Предзагрузка: ±${PRELOAD_LIMIT} кадров`);
     }
 
-    // Мышь
+    // События
     viewer.addEventListener('mousedown', onDragStart);
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragEnd);
-
-    // Тач-события
     viewer.addEventListener('touchstart', onDragStart, { passive: false });
     viewer.addEventListener('touchmove', onDragMove, { passive: false });
     viewer.addEventListener('touchend', onDragEnd);
-
     viewer.addEventListener('dragstart', (e) => e.preventDefault());
     
-    // Запуск
     init();
-    
-    console.log(`🚀 360° плеер запущен. Всего кадров: ${TOTAL_FRAMES}`);
-    console.log(`📁 Ожидается папка: ${IMAGE_PATH}`);
-    console.log(`📸 Первый файл: ${getImageUrl(1)}`);
-    console.log(`🎨 Blur фон статичен (из первого кадра) и НЕ МОРГАЕТ`);
 </script>
 </body>
 </html>
