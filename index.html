@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>360° Облёт объекта с инерцией</title>
     <style>
         * {
@@ -82,10 +82,10 @@
             to { transform: translate(-50%, -50%) rotate(360deg); }
         }
 
-        /* Подсказка теперь внутри #spin-viewer, а не fixed */
+        /* Подсказка с отступом для безопасной зоны */
         .controls-hint {
             position: absolute;
-            bottom: 20px;
+            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0,0,0,0.6);
@@ -105,11 +105,11 @@
             opacity: 1;
         }
 
-        /* Кнопка полноэкранного режима */
+        /* Кнопка полноэкранного режима с отступом для безопасной зоны */
         .fullscreen-btn {
             position: absolute;
-            bottom: 20px;
-            right: 20px;
+            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+            right: calc(20px + env(safe-area-inset-right, 0px));
             width: 44px;
             height: 44px;
             border-radius: 50%;
@@ -141,12 +141,11 @@
             display: block;
         }
 
+        /* Адаптация для мобильных */
         @media (max-width: 600px) {
             .fullscreen-btn {
                 width: 40px;
                 height: 40px;
-                bottom: 15px;
-                right: 15px;
             }
             .fullscreen-icon {
                 width: 18px;
@@ -154,12 +153,21 @@
             }
             .controls-hint {
                 font-size: 12px;
-                bottom: 15px;
                 padding: 6px 12px;
             }
         }
 
-        /* Стили для полноэкранного режима */
+        /* Дополнительный отступ для iPhone с динамическим островом и домашней индикацией */
+        @supports (padding: max(0px)) {
+            .controls-hint {
+                bottom: max(20px, env(safe-area-inset-bottom, 20px));
+            }
+            .fullscreen-btn {
+                bottom: max(20px, env(safe-area-inset-bottom, 20px));
+                right: max(20px, env(safe-area-inset-right, 20px));
+            }
+        }
+
         #spin-viewer:-webkit-full-screen {
             width: 100%;
             height: 100%;
@@ -176,12 +184,10 @@
     <div class="blur-bg" id="blurBg"></div>
     <img id="spin-image" src="" alt="360° облёт объекта">
     
-    <!-- Подсказка теперь ВНУТРИ spin-viewer -->
     <div class="controls-hint" id="controlsHint">
         🖱️ Перетащи мышкой | 👆 Или свайпни с инерцией
     </div>
     
-    <!-- Кнопка полноэкранного режима -->
     <button class="fullscreen-btn" id="fullscreenBtn" title="Полноэкранный режим">
         <svg class="fullscreen-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
@@ -197,12 +203,10 @@
     const FILE_SUFFIX = ".jpeg";
     const ZERO_PADDING = 0;
     
-    // Настройки инерции
     const INERTIA_DECAY = 0.92;
     const INERTIA_STOP_SPEED = 0.01;
     // ===================================================
 
-    // Элементы
     const viewer = document.getElementById('spin-viewer');
     const imgElement = document.getElementById('spin-image');
     const blurBg = document.getElementById('blurBg');
@@ -212,23 +216,34 @@
 
     // ========== ПОЛНОЭКРАННЫЙ РЕЖИМ ==========
     function toggleFullscreen() {
-        if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-            // Вход в полноэкранный режим
-            const elem = viewer;
-            if (elem.requestFullscreen) {
-                elem.requestFullscreen();
-            } else if (elem.webkitRequestFullscreen) { /* Safari */
-                elem.webkitRequestFullscreen();
-            } else if (elem.msRequestFullscreen) { /* IE/Edge */
-                elem.msRequestFullscreen();
+        const elem = viewer;
+        
+        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || 
+                               document.mozFullScreenElement || document.msFullscreenElement);
+        
+        if (!isFullscreen) {
+            const requestMethod = elem.requestFullscreen ||
+                                  elem.webkitRequestFullscreen ||
+                                  elem.mozRequestFullScreen ||
+                                  elem.msRequestFullscreen;
+            
+            if (requestMethod) {
+                requestMethod.call(elem);
             }
+            
+            if (elem.webkitEnterFullscreen) {
+                elem.webkitEnterFullscreen();
+            }
+            
             updateFullscreenIcon(true);
         } else {
-            // Выход из полноэкранного режима
-            if (document.exitFullscreen) {
-                document.exitFullscreen();
-            } else if (document.webkitExitFullscreen) {
-                document.webkitExitFullscreen();
+            const exitMethod = document.exitFullscreen ||
+                               document.webkitExitFullscreen ||
+                               document.mozCancelFullScreen ||
+                               document.msExitFullscreen;
+            
+            if (exitMethod) {
+                exitMethod.call(document);
             }
             updateFullscreenIcon(false);
         }
@@ -237,25 +252,31 @@
     function updateFullscreenIcon(isFullscreen) {
         const svg = fullscreenBtn.querySelector('.fullscreen-icon');
         if (isFullscreen) {
-            // Иконка "сжать" (выход)
             svg.innerHTML = '<path d="M8 14H6v4h4v-2H8v-2zm-2-4h2V8h2V6H6v4zm10 4h-2v2h-2v2h4v-4zm-2-8v2h2v2h2V6h-4z"/>';
         } else {
-            // Иконка "развернуть" (вход)
             svg.innerHTML = '<path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>';
         }
     }
 
-    // Слушаем изменение полноэкранного режима
-    document.addEventListener('fullscreenchange', () => {
-        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-        updateFullscreenIcon(isFullscreen);
-    });
-    document.addEventListener('webkitfullscreenchange', () => {
-        const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-        updateFullscreenIcon(isFullscreen);
+    const fullscreenEvents = ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'];
+    fullscreenEvents.forEach(event => {
+        document.addEventListener(event, () => {
+            const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || 
+                                   document.mozFullScreenElement || document.msFullscreenElement);
+            updateFullscreenIcon(isFullscreen);
+        });
     });
 
-    fullscreenBtn.addEventListener('click', toggleFullscreen);
+    fullscreenBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleFullscreen();
+    });
+    
+    fullscreenBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleFullscreen();
+    }, { passive: false });
     // ==========================================
 
     function getImageUrl(frameNumber) {
@@ -421,7 +442,6 @@
         console.log(`📦 Предзагружено ${TOTAL_FRAMES - 1} кадров в фоне`);
     }
 
-    // События
     viewer.addEventListener('mousedown', onDragStart);
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragEnd);
@@ -437,8 +457,7 @@
     console.log(`🚀 360° плеер запущен. Всего кадров: ${TOTAL_FRAMES}`);
     console.log(`📁 Ожидается папка: ${IMAGE_PATH}`);
     console.log(`📸 Первый файл: ${getImageUrl(1)}`);
-    console.log(`🖥️ Кнопка полноэкранного режима добавлена`);
-    console.log(`💡 Подсказка теперь внутри #spin-viewer и не пропадает в fullscreen`);
+    console.log(`🖥️ Кнопка и подсказка подняты для safe-area`);
 </script>
 </body>
 </html>
