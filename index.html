@@ -48,7 +48,6 @@
             opacity: 1;
         }
 
-        /* Статичный blur фон — генерируется один раз из первого кадра */
         .blur-bg {
             position: absolute;
             top: 0;
@@ -61,7 +60,7 @@
             transform: scale(1.1);
             z-index: 1;
             opacity: 1;
-            transition: none;  /* Никаких переходов, фон статичен */
+            transition: none;
         }
 
         .loader {
@@ -126,11 +125,11 @@
 
 <script>
     // ==================== НАСТРОЙКИ ====================
-    const TOTAL_FRAMES = 70;              // 70 картинок
-    const IMAGE_PATH = "images/";         // Папка с картинками
-    const FILE_PREFIX = "out";            // Префикс: "out"
-    const FILE_SUFFIX = ".jpeg";          // Расширение: .jpeg
-    const ZERO_PADDING = 0;               // 0 = out1, out2 (без нулей)
+    const TOTAL_FRAMES = 70;
+    const IMAGE_PATH = "images/";
+    const FILE_PREFIX = "out";
+    const FILE_SUFFIX = ".jpeg";
+    const ZERO_PADDING = 0;
     
     // Настройки инерции
     const INERTIA_DECAY = 0.92;
@@ -148,11 +147,12 @@
 
     let currentFrame = 1;
     let isDragging = false;
+    let dragStartFrame = 1;
+    let dragStartX = 0;
     let lastX = 0;
     let lastTimestamp = 0;
     let velocity = 0;
     let inertiaAnimationId = null;
-    let blurInitialized = false;
     
     const viewer = document.getElementById('spin-viewer');
     const imgElement = document.getElementById('spin-image');
@@ -168,61 +168,29 @@
         controlsHint.classList.add('visible');
     }
 
-    // Обновление только основного изображения (фон НЕ ТРОГАЕМ)
-    function updateImage(frame) {
+    // Обновление изображения по номеру кадра
+    function updateImage(frame, skipPreload = false) {
+        // Нормализуем кадр в диапазон 1..TOTAL_FRAMES
         while (frame > TOTAL_FRAMES) frame -= TOTAL_FRAMES;
         while (frame < 1) frame += TOTAL_FRAMES;
         
-        if (Math.abs(currentFrame - frame) > 0.1) {
-            currentFrame = frame;
-            const roundedFrame = Math.round(currentFrame);
-            const imageUrl = getImageUrl(roundedFrame);
+        const roundedFrame = Math.round(frame);
+        
+        if (currentFrame !== roundedFrame) {
+            currentFrame = roundedFrame;
+            const imageUrl = getImageUrl(currentFrame);
             
-            // Обновляем только чёткое изображение
             if (imgElement.src !== imageUrl) {
                 imgElement.src = imageUrl;
             }
         }
     }
 
-    function getFrameFromPosition(clientX) {
-        const width = window.innerWidth;
-        let t = clientX / width;
-        t = Math.max(0, Math.min(1, t));
-        return 1 + t * (TOTAL_FRAMES - 1);
-    }
-
-    function startInertia() {
-        if (inertiaAnimationId) cancelAnimationFrame(inertiaAnimationId);
-        
-        let lastFrameTime = performance.now();
-        let currentVelocity = velocity;
-        let currentFrameValue = currentFrame;
-        
-        function animateInertia(now) {
-            const dt = Math.min(32, now - lastFrameTime);
-            lastFrameTime = now;
-            
-            currentFrameValue += currentVelocity * dt;
-            currentVelocity *= INERTIA_DECAY;
-            
-            updateImage(currentFrameValue);
-            
-            if (Math.abs(currentVelocity) > INERTIA_STOP_SPEED) {
-                inertiaAnimationId = requestAnimationFrame(animateInertia);
-            } else {
-                updateImage(Math.round(currentFrameValue));
-                inertiaAnimationId = null;
-                velocity = 0;
-            }
-        }
-        
-        inertiaAnimationId = requestAnimationFrame(animateInertia);
-    }
-
+    // ОТНОСИТЕЛЬНОЕ перетаскивание: смещение мыши → смещение кадров
     function onDragStart(e) {
         e.preventDefault();
         
+        // Останавливаем текущую инерцию
         if (inertiaAnimationId) {
             cancelAnimationFrame(inertiaAnimationId);
             inertiaAnimationId = null;
@@ -231,12 +199,11 @@
         isDragging = true;
         velocity = 0;
         
-        const clientX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
-        lastX = clientX;
+        // Запоминаем начальную позицию и текущий кадр
+        dragStartX = e.clientX ?? (e.touches ? e.touches[0].clientX : 0);
+        dragStartFrame = currentFrame;
+        lastX = dragStartX;
         lastTimestamp = performance.now();
-        
-        const newFrame = getFrameFromPosition(clientX);
-        updateImage(newFrame);
         
         viewer.style.cursor = 'grabbing';
     }
@@ -249,12 +216,27 @@
         const now = performance.now();
         const dt = Math.max(1, now - lastTimestamp);
         
-        const deltaPx = currentX - lastX;
-        const pixelVelocity = deltaPx / dt;
-        const frameVelocity = pixelVelocity / window.innerWidth * TOTAL_FRAMES;
+        // Вычисляем смещение по горизонтали
+        const deltaX = currentX - dragStartX;
+        
+        // Конвертируем смещение пикселей в смещение кадров
+        // Чем шире экран, тем больше пикселей нужно для полного оборота
+        const deltaFrames = (deltaX / window.innerWidth) * TOTAL_FRAMES;
+        
+        // Новый кадр = начальный кадр + смещение
+        let newFrame = dragStartFrame + deltaFrames;
+        
+        // Нормализуем кадр
+        while (newFrame > TOTAL_FRAMES) newFrame -= TOTAL_FRAMES;
+        while (newFrame < 1) newFrame += TOTAL_FRAMES;
+        
+        // Вычисляем скорость для инерции (по текущему движению)
+        const deltaX_last = currentX - lastX;
+        const pixelVelocity = deltaX_last / dt;
+        const frameVelocity = (pixelVelocity / window.innerWidth) * TOTAL_FRAMES;
         velocity = frameVelocity * 0.7;
         
-        const newFrame = getFrameFromPosition(currentX);
+        // Обновляем изображение
         updateImage(newFrame);
         
         lastX = currentX;
@@ -265,23 +247,59 @@
         isDragging = false;
         viewer.style.cursor = 'grab';
         
+        // Запускаем инерцию, если скорость достаточна
         if (Math.abs(velocity) > 0.02) {
             startInertia();
         } else {
             velocity = 0;
+            // Доводим до целого кадра
             updateImage(Math.round(currentFrame));
         }
     }
 
-    // ИНИЦИАЛИЗАЦИЯ: загружаем первый кадр для blur и основного изображения
+    // Анимация инерции
+    function startInertia() {
+        if (inertiaAnimationId) cancelAnimationFrame(inertiaAnimationId);
+        
+        let lastFrameTime = performance.now();
+        let currentVelocity = velocity;
+        let currentFrameValue = currentFrame;
+        
+        function animateInertia(now) {
+            const dt = Math.min(32, now - lastFrameTime);
+            lastFrameTime = now;
+            
+            // Обновляем позицию по скорости
+            currentFrameValue += currentVelocity * dt;
+            
+            // Применяем затухание
+            currentVelocity *= INERTIA_DECAY;
+            
+            // Обновляем изображение
+            updateImage(currentFrameValue);
+            
+            // Продолжаем или останавливаемся
+            if (Math.abs(currentVelocity) > INERTIA_STOP_SPEED) {
+                inertiaAnimationId = requestAnimationFrame(animateInertia);
+            } else {
+                updateImage(Math.round(currentFrameValue));
+                inertiaAnimationId = null;
+                velocity = 0;
+            }
+        }
+        
+        inertiaAnimationId = requestAnimationFrame(animateInertia);
+    }
+
+    // ИНИЦИАЛИЗАЦИЯ
     function init() {
         const firstImageUrl = getImageUrl(1);
         
-        // 1. Сразу устанавливаем blur фон из первого кадра (статично, больше не меняется)
+        // Устанавливаем статичный blur фон из первого кадра
         blurBg.style.backgroundImage = `url('${firstImageUrl}')`;
         console.log('🎨 Blur фон установлен из первого кадра (статичен)');
         
-        // 2. Загружаем основное изображение
+        // Загружаем основное изображение
         const img = new Image();
         
         img.onload = function() {
@@ -291,7 +309,7 @@
             hideLoader();
             setTimeout(() => showControlsHint(), 100);
             
-            // Предзагружаем остальные 69 кадров в фоне
+            // Предзагружаем остальные кадры в фоне
             preloadRemainingFrames();
         };
         
@@ -313,16 +331,15 @@
         console.log(`📦 Предзагружено ${TOTAL_FRAMES - 1} кадров в фоне`);
     }
 
-    // Мышь
+    // События
     viewer.addEventListener('mousedown', onDragStart);
     window.addEventListener('mousemove', onDragMove);
     window.addEventListener('mouseup', onDragEnd);
-
-    // Тач-события
+    
     viewer.addEventListener('touchstart', onDragStart, { passive: false });
     viewer.addEventListener('touchmove', onDragMove, { passive: false });
     viewer.addEventListener('touchend', onDragEnd);
-
+    
     viewer.addEventListener('dragstart', (e) => e.preventDefault());
     
     // Запуск
@@ -331,7 +348,7 @@
     console.log(`🚀 360° плеер запущен. Всего кадров: ${TOTAL_FRAMES}`);
     console.log(`📁 Ожидается папка: ${IMAGE_PATH}`);
     console.log(`📸 Первый файл: ${getImageUrl(1)}`);
-    console.log(`🎨 Blur фон статичен (из первого кадра) и НЕ МОРГАЕТ`);
+    console.log(`🎨 Blur фон статичен, скролл ОТНОСИТЕЛЬНЫЙ (без рывков)`);
 </script>
 </body>
 </html>
