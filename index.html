@@ -82,10 +82,9 @@
             to { transform: translate(-50%, -50%) rotate(360deg); }
         }
 
-        /* Подсказка с отступом для безопасной зоны */
+        /* Подсказка с динамическим отступом */
         .controls-hint {
             position: absolute;
-            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
             left: 50%;
             transform: translateX(-50%);
             background: rgba(0,0,0,0.6);
@@ -98,18 +97,16 @@
             z-index: 10;
             white-space: nowrap;
             opacity: 0;
-            transition: opacity 0.3s ease;
+            transition: opacity 0.3s ease, bottom 0.2s ease;
         }
 
         .controls-hint.visible {
             opacity: 1;
         }
 
-        /* Кнопка полноэкранного режима с отступом для безопасной зоны */
+        /* Кнопка полноэкранного режима с динамическим отступом */
         .fullscreen-btn {
             position: absolute;
-            bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-            right: calc(20px + env(safe-area-inset-right, 0px));
             width: 44px;
             height: 44px;
             border-radius: 50%;
@@ -157,14 +154,45 @@
             }
         }
 
-        /* Дополнительный отступ для iPhone с динамическим островом и домашней индикацией */
-        @supports (padding: max(0px)) {
+        /* Вертикальная ориентация (portrait) - большой отступ */
+        @media (orientation: portrait) {
             .controls-hint {
-                bottom: max(20px, env(safe-area-inset-bottom, 20px));
+                bottom: 150px;
             }
             .fullscreen-btn {
-                bottom: max(20px, env(safe-area-inset-bottom, 20px));
-                right: max(20px, env(safe-area-inset-right, 20px));
+                bottom: 150px;
+                right: 20px;
+            }
+        }
+
+        /* Горизонтальная ориентация (landscape) - маленький отступ */
+        @media (orientation: landscape) {
+            .controls-hint {
+                bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+            }
+            .fullscreen-btn {
+                bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+                right: calc(20px + env(safe-area-inset-right, 0px));
+            }
+        }
+
+        /* Дополнительно: очень высокие экраны (типа iPhone 14 Pro Max в портрете) */
+        @media (orientation: portrait) and (min-height: 800px) {
+            .controls-hint {
+                bottom: 180px;
+            }
+            .fullscreen-btn {
+                bottom: 180px;
+            }
+        }
+
+        /* Для совсем маленьких экранов в портрете */
+        @media (orientation: portrait) and (max-height: 700px) {
+            .controls-hint {
+                bottom: 120px;
+            }
+            .fullscreen-btn {
+                bottom: 120px;
             }
         }
 
@@ -278,6 +306,25 @@
         toggleFullscreen();
     }, { passive: false });
     // ==========================================
+
+    // Функция для динамической корректировки отступов при смене ориентации
+    function adjustMarginsForOrientation() {
+        const isPortrait = window.matchMedia("(orientation: portrait)").matches;
+        const hint = document.querySelector('.controls-hint');
+        const btn = document.querySelector('.fullscreen-btn');
+        
+        if (isPortrait) {
+            // В портретной ориентации используем CSS-медиа, но можно и JS-костыль
+            console.log('📱 Вертикальная ориентация - большие отступы');
+        } else {
+            console.log('📱 Горизонтальная ориентация - маленькие отступы');
+        }
+    }
+    
+    // Слушаем смену ориентации
+    window.addEventListener('resize', adjustMarginsForOrientation);
+    window.addEventListener('orientationchange', adjustMarginsForOrientation);
+    adjustMarginsForOrientation();
 
     function getImageUrl(frameNumber) {
         if (ZERO_PADDING > 0) {
@@ -457,7 +504,7 @@
     console.log(`🚀 360° плеер запущен. Всего кадров: ${TOTAL_FRAMES}`);
     console.log(`📁 Ожидается папка: ${IMAGE_PATH}`);
     console.log(`📸 Первый файл: ${getImageUrl(1)}`);
-    console.log(`🖥️ Кнопка и подсказка подняты для safe-area`);
+    console.log(`📱 Вертикальный режим: отступ 150-180px, горизонтальный: 20px`);
 </script>
 </body>
 </html>
